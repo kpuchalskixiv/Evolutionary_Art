@@ -1,0 +1,25 @@
+
+inne loss F
+
+ES TODO
+MUTACJA
+ na sigmach (jak na gicie) sigma*random()
+tylko część paramtrów (np tylko cordy i przejrzystość)
+	losować w miutacji
+	losować do Ktego parametru
+SELEKCJA
+rodziców, 
+inna niż topK, turniejowa? na nową populację
+CROSSOVERY
+wymiana kółek
+coś jeszcze?
+INICJALIZACJA
+część populacji full random
+część bez kółek opacity=0 na starcie
+część w jednym kolorze, jednego rozmiaru itd.
+ograniczyć promień?
+
+
+OTHER
+inne algorytmy
+coś basic, SGA ?
