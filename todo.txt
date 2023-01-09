@@ -7,6 +7,8 @@ MUTACJA
 tylko część paramtrów (np tylko cordy i przejrzystość)
 	losować w miutacji
 	losować do Ktego parametru
+tylko część kółek
+
 SELEKCJA
 rodziców, 
 inna niż topK, turniejowa? na nową populację
@@ -23,3 +25,14 @@ ograniczyć promień?
 OTHER
 inne algorytmy
 coś basic, SGA ?
+
+
+jak zaczynać
+nie od 100 kółek
+zacząć od 10, potem zwiększyć do 50, 100 itd
+pilnować promień dodawanych
+
+dodawane kólka powinny podkreślać szczegóły, czyli promień jak lr
+
+dorzucać kółka tam gdzie nasz generowany obrazek jest taki sam
+porównywać z segmentami targetu, tam gdzie źle dorzucać
