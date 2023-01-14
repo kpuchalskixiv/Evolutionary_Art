@@ -1,6 +1,9 @@
 
 inne loss F
 
+utrzymywać zróżnicowaną populację
+
+
 ES TODO
 MUTACJA
  na sigmach (jak na gicie) sigma*random()
