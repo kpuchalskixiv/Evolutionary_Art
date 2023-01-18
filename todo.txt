@@ -1,3 +1,5 @@
+zamiast dodawać losowo, duplikować (+ random) obecne
+
 
 inne loss F
 
