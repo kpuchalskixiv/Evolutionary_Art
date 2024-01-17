@@ -1,1 +1,4 @@
-# EA project for 2022/23 
+# EA project for winter 2022/23 
+
+
+# Rewriting to CUDA implementation in winter 23/24
