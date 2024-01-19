@@ -28,7 +28,7 @@ __global__ void eval_kernel(
   float* target_img,
   int img_x, int img_y,
 
-  bool children=true
+  bool children=false
 ){
 
   extern  __shared__  float temp[];
@@ -42,9 +42,9 @@ __global__ void eval_kernel(
   temp[tid]=0;
   int mate_pixel, org_pixel;
   while(pixd<img_x*img_y){
-    mate_pixel=population_images[mate_idx*img_x*img_y + pixd];
+    mate_pixel=population_images[mate_img_idx + pixd];
     org_pixel=target_img[pixd];
-    temp[threadIdx.x]+=(mate_pixel-org_pixel)*(mate_pixel-org_pixel);
+    temp[tid]+=(mate_pixel-org_pixel)*(mate_pixel-org_pixel);
     pixd+=blockDim.x;    
   }
   __syncthreads(); 
@@ -61,6 +61,16 @@ __global__ void eval_kernel(
 
 }
 
+// block per image
+__global__ void reset_images_kernel(float* population_images, int x_img, int y_img){
+  int img_start=blockIdx.x*x_img*y_img;
+  int pixd=threadIdx.x;
+  while(pixd<img_start+x_img*y_img){
+    population_images[pixd]=0.0f;
+    pixd+=blockDim.x;
+  }
+
+}
 
 //draw_kernel<<<#mate, 128>>>
 // one block draws one mate
@@ -71,44 +81,52 @@ __global__ void draw_kernel(
 
   int img_x, int img_y,
 
-  bool children=true, int genotype_length=6)
+  bool children=false, int genotype_length=8)
 {
-  int mate_idx, raw_mate_idx;
-  if (children) raw_mate_idx=pop_size + blockIdx.x;
-  else          raw_mate_idx=blockIdx.x;
-  mate_idx=raw_mate_idx*mate_size*genotype_length;
+  int mate_chromosome_idx, mate_idx;
+  if (children) mate_idx=pop_size + blockIdx.x;
+  else          mate_idx=blockIdx.x;
+  mate_chromosome_idx=mate_idx*mate_size*genotype_length;
   
   int x_ul,y_ul,x_br,y_br, x_size, y_size, pixd, pixd_row, pixd_col, rectangle_start, org_pixel;
   float opacity, g;
   for(int r=0; r<limit; r++){ //r for recatangle
-    x_ul=(int)(population[mate_idx]*(img_x-1));
-    y_ul=(int)(population[mate_idx+1]*(img_y-1));
-    x_br=(int)(population[mate_idx+2]*(img_x-1));
-    y_br=(int)(population[mate_idx+3]*(img_y-1));
-    opacity=population[mate_idx+4];
-    g=population[mate_idx+5];
+    x_ul=(int)(population[mate_chromosome_idx]*(img_x-1));
+    y_ul=(int)(population[mate_chromosome_idx+1]*(img_y-1));
+    x_br=(int)(population[mate_chromosome_idx+2]*(img_x-1));
+    y_br=(int)(population[mate_chromosome_idx+3]*(img_y-1));
+    opacity=population[mate_chromosome_idx+4];
+    g=population[mate_chromosome_idx+5];
 
-    x_size=x_br-x_ul;
-    y_size=y_br-y_ul;
+    x_ul=min(max(0, x_ul), img_x);
+    y_ul=min(max(0, y_ul), img_y);
+    x_br=min(max(0, x_br), img_x);
+    y_br=min(max(0, y_br), img_y);
+
+    x_size=max(0, x_br-x_ul);
+    y_size=max(0, y_br-y_ul);
 
     pixd=threadIdx.x;
     pixd_row=pixd/y_size;
     pixd_col=pixd%x_size;
 
-    rectangle_start=raw_mate_idx*img_x*img_y // idx of mate image
+    rectangle_start=mate_idx*img_x*img_y // idx of mate image
                         +x_ul*img_y + y_ul ; // start of rectangle
 
-    while((pixd_row<y_size) || (pixd_col<x_size)){ // cache misses should occur whilst changing rows
-      org_pixel=population_images[  rectangle_start 
-                        +pixd_row*img_y + pixd_col  // thread pixel
-                        ];
+    while((pixd<x_size*y_size)
+    && (pixd_row<y_size) 
+    && (pixd_col<x_size)){ // cache misses should occur whilst changing rows
       population_images[rectangle_start
-                        +pixd_row*img_y + pixd_col
-                        ]=(1-opacity)*org_pixel+opacity*g;
+                        +pixd_row*img_y + y_ul+pixd_col
+                        ]*=(1-opacity);
+      population_images[rectangle_start
+                        +pixd_row*img_y + y_ul+pixd_col
+                        ]+=opacity*g;
       
       pixd+=blockDim.x;
       pixd_row=pixd/y_size;
       pixd_col=pixd%x_size;
+     // __syncthreads(); 
     }
     //ensure previous rectangle has been drawn
     __syncthreads(); 
