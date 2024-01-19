@@ -4,76 +4,68 @@
 #include <math.h>
 
 #include <helper_cuda.h>
-#include "opencv2/core.hpp"
-
-////////////////////////////////////////////////////////////////////////
-// define kernel block size
-////////////////////////////////////////////////////////////////////////
-
-#define pop_size 64  // blockX
-#define mate_size 16 // blockX
-#define circles_per_thread 1 // blockZ
-
-////////////////////////////////////////////////////////////////////////
-// include kernel function
-////////////////////////////////////////////////////////////////////////
-
 #include <ES_kernel.h>
 
-////////////////////////////////////////////////////////////////////////
-// Main program
-////////////////////////////////////////////////////////////////////////
-float random_circle(
-float max_radius_scale=1.0, float max_opacity_scale=1.0,
-float x_min=0, float x_max=1, 
-float y_min=0, float y_max=1)
+
+// utils
+
+
+
+int cmp(const void *a, const void *b)
 {
-  return 0
+    struct loss_item *a1 = (struct loss_item *)a;
+    struct loss_item *a2 = (struct loss_item *)b;
+    if ((*a1).value > (*a2).value)
+        return -1;
+    else if ((*a1).value < (*a2).value)
+        return 1;
+    else
+        return 0;
+}
+float sum_array(float* arr, int start, int end){
+  int sum=0;
+  for(int i=start; i<end; i++)
+    sum+=arr[i];
+  return sum;
 }
 
 void save_best(){
 
 }
 
-float sum_array(float* arr, int start, int end){
-  sum=0
-  for(int i=start; i<end; i++)
-    sum+=arr[i]
-  return sum
-}
 
+
+////////////////////////////////////////////////////////////////////////
+// Main program
+////////////////////////////////////////////////////////////////////////
 
 int main(int argc, const char **argv){
 
-  int children_per_mate=8, parents=8;
-  int iters=20000, log_every=300;
+  int iters=20000, log_every=100;
   bool gray=true;
-  int circle_dim;
+  int genotype_length;
   int img_x, img_y;
 
-
-  long long bx, by, bz, i, j, k, ind;
-  float    *h_u1, *h_u2, *h_foo,
-           *d_u1, *d_u2, *d_foo;
-
-  float *h_population,
+  float *best_mate_img,
         *d_population,
-        *d_eval_population;
+        *d_population_images,
+        *d_mutation_coef;
   
 
-  if(gray) circle_dim=5;
-  else circle_dim=7;
+  if(gray) genotype_length=6;
+  else genotype_length=8;
 
-  size_t    bytes = (pop_size + children_per_mate*parents) *mate_size*circle_dim;
+  size_t    bytes = (pop_size + children_per_mate*parents) *mate_size*genotype_length;
   size_t    eval_bytes =  (pop_size + children_per_mate*parents) *img_x*img_y;
 
-  // grid is popsizeXcircler_per_mateXcricledim (x,y,r,alpha,gray - cause black&white for start)
-  printf("Grid dimensions: %d x %d x %d \n\n", pop_size, mate_size, circle_dim);
+  // grid is popsizeXcircler_per_mateXcricledim (x1,y1,x2,y2,alpha,gray - cause black&white for start)
+  printf("Grid dimensions: %d x %d x %d \n\n", pop_size, mate_size, genotype_length);
 
   // allocate memory for arrays
-  h_population = (float *)malloc(sizeof(float) * bytes);
+  best_mate_img = (float *)malloc(sizeof(float) * img_y*img_x);
   checkCudaErrors( cudaMalloc((void **)&d_population, sizeof(float) * bytes) );
-  checkCudaErrors( cudaMalloc((void **)&d_eval_population, sizeof(float) * eval_bytes) );
+  checkCudaErrors( cudaMalloc((void **)&d_population_images, sizeof(float) * eval_bytes) );
+  checkCudaErrors( cudaMalloc((void **)&d_mutation_coef, sizeof(float) * children_per_mate*parents*mate_size*genotype_length) );
 
 
   // randomly initialize population
@@ -81,54 +73,55 @@ int main(int argc, const char **argv){
   curandGenerator_t gen;
   checkCudaErrors( curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT) );
   //checkCudaErrors( curandSetPseudoRandomGeneratorSeed(gen, 1234ULL) );
-  checkCudaErrors( curandGenerateUniform(gen, d_population, pop_size * mate_size * circle_dim) );
+  checkCudaErrors( curandGenerateUniform(gen, d_population, bytes) );
 
   // initialise card
   findCudaDevice(argc, argv);
-  // initialise CUDA timing
-  float milli;
-  cudaEvent_t start, stop;
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
-
-
-  cudaEventRecord(start);
-
 
   // Set up the execution configuration
   int no_circles=4, update_frequency=100, last_update_iter=0;
   float *log_objective_values, *iter_evals;
-  float add_cricle_threshold=0.01;
-  log_objective_values=malloc(sizeof(float)*iters);
+  float add_cricle_threshold=0.01, prev, curr;
+  log_objective_values=(float *)malloc(sizeof(float)*iters);
 
-  int circles_to_mutate=pop_size*mat;
   //run evaluation on basic population
+  //_kernel<<1,pop_size>>(d_population, d_eval_population, 0, pop_size)
+
   int iter;
   for (iter=0; iter<iters; iter++) {
+    if (iter%log_every==0){
+      save_best();
+      printf("iter number: %d", iter);
+    }
+    
+    qsort(population_losses, pop_size+children_per_mate*parents, sizeof(population_losses[0]), cmp);
+    
+
     // run parent selection
+    // for starters, choose K best mates
 
     // run crossover kernel
     // TODO
 
+
     // run mutation kernel, circle per thread
     //<<<nblocks,nthreads>>>
-    mutate_kernel<<parents,mate_size*children_per_mate>>(d_population, parent_idxs, no_circles, children_per_mate) // add sigmas
+    checkCudaErrors( curandGenerateNormal(gen, d_mutation_coef, 
+                                      children_per_mate*parents * mate_size * genotype_length,
+                                      1, 0.001) );
+    //mutate_kernel<<parents,mate_size*children_per_mate>>(d_population, parent_idxs, d_mutation_coef, no_circles, children_per_mate) // add sigmas
     
     // run evaluation kerenel
     // probably most time consuming part so focus on pararellizing this
-    evaluate_kernel<<parents,children_per_mate>>(d_population, d_eval_population)
+    //evaluate_kernel<<parents,children_per_mate>>(d_population, d_eval_population, true)
     // select next population, little data  128~=pop_size+no_children floats
 
-    //add synchThreads
-
-    if (iter%log_every==0)
-      save_best()
 
     if(iter%update_frequency==0 
       && iter-last_update_iter>=update_frequency*2 
       && no_circles<=mate_size){
-      prev=sum_array(log_objective_values, no_iter-2*update_frequency, no_iter-update_frequency)
-      curr=sum_array(log_objective_values, no_iter-update_frequency, no_iter)
+      prev=sum_array(log_objective_values, iter-2*update_frequency, iter-update_frequency);
+      curr=sum_array(log_objective_values, iter-update_frequency, iter);
 
       if((prev-curr)/prev < add_cricle_threshold*powf(0.995, no_circles)){
         no_circles+=1;
@@ -137,16 +130,13 @@ int main(int argc, const char **argv){
     }
   }
 
-  cudaEventRecord(stop);
-  cudaEventSynchronize(stop);
-  cudaEventElapsedTime(&milli, start, stop);
-  printf("%dx ES CUDA time: %.1f (ms) \n\n", iter, milli);
-    
  // Release GPU and CPU memory
 
   checkCudaErrors( cudaFree(d_population) );
-  checkCudaErrors( cudaFree(d_eval_population) );
-  free(h_population);
+  checkCudaErrors( cudaFree(d_population_images) );
+  checkCudaErrors( cudaFree(d_mutation_coef) );
+
+  free(best_mate_img);
   free(log_objective_values);
 
   cudaDeviceReset();
