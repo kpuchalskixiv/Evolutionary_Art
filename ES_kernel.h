@@ -1,8 +1,8 @@
 // device code
-#define pop_size 128  // blockX
+#define pop_size 16  // blockX
 #define mate_size 128 // blockX
-#define children_per_mate 16
-#define parents 8
+#define children_per_mate 3
+#define parents 6
 #define genotype_length 5
 
 

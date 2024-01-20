@@ -26,15 +26,22 @@ int cmp(const void *a, const void *b)
         return 0;
 }
 float sum_array(float* arr, int start, int end){
-  int sum=0;
+  float sum=0;
   for(int i=start; i<end; i++)
     sum+=arr[i];
+  return sum;
+}
+float sum_mse(loss_item* arr, int start, int end){
+  float sum=0;
+  for(int i=start; i<end; i++)
+    sum+=arr[i].value;
   return sum;
 }
 
 void save_best(float* d_best_img, float* h_best_img,
                float* d_best_mate, float* h_best_mate,
-              int img_x, int img_y, int iter, int limit){
+              int img_x, int img_y, int iter, int limit,
+              float best_mse, float avg_mse){
   checkCudaErrors(cudaMemcpy(h_best_img, d_best_img, //destination, source
                               img_x*img_y*sizeof(float),
                               cudaMemcpyDeviceToHost) );
@@ -54,11 +61,14 @@ void save_best(float* d_best_img, float* h_best_img,
 
   fclose(fp);
 
-  if(iter==1) fp = fopen("./cuda_output/mona_mates.txt", "w");
+  if(iter==1){
+    fp = fopen("./cuda_output/mona_mates.txt", "w");
+   // fprintf("iter, no_squares, best_mse, avg_mse, %d", 0);
+  }
   else fp = fopen("./cuda_output/mona_mates.txt", "a");
   // check for error here
 
-  fprintf(fp, "\n %d, %d, ", iter, limit);
+  fprintf(fp, "\n %d, %d, %f, %f, ", iter, limit, best_mse, avg_mse);
   for (unsigned i = 0; i < mate_size*genotype_length; i++) {
       fprintf(fp, "%f, ", h_best_mate[i]);
       // check for error here too
@@ -162,21 +172,21 @@ int main(int argc, const char **argv){
  // checkCudaErrors( curandSetPseudoRandomGeneratorSeed(gen, 1234ULL) );
   checkCudaErrors( curandGenerateUniform(gen, d_population, bytes) );
  // checkCudaErrors( curandGenerateNormal(gen, d_population, bytes, 0.5f, 0.2f) );
-  fix_param_kernel<<<pop_size+children_per_mate*parents, mate_size>>>(d_population, 3, 0.5f) ;
-  getLastCudaError("fixing opacity kernel failed\n");
-  cudaDeviceSynchronize();  
+  //fix_param_kernel<<<pop_size+children_per_mate*parents, mate_size>>>(d_population, 3, 0.5f) ;
+  //getLastCudaError("fixing opacity kernel failed\n");
+ // cudaDeviceSynchronize();  
 
 
   // Set up the execution configuration
   int iters=1000000, log_every=10000,
 
-  no_figures=2, update_frequency=2000;
+  no_figures=4, update_frequency=2000;
 
 
   
   int last_update_iter=0;
   float *log_objective_values;
-  float add_cricle_threshold=0.01, prev, curr, max_mse, r_float;
+  float add_cricle_threshold=0.01, prev, curr, max_mse, r_float, avg_mse;
   log_objective_values=(float *)malloc(sizeof(float)*iters);
   int iter, m=0;
 
@@ -187,11 +197,13 @@ int main(int argc, const char **argv){
                         
   for (iter=0; iter<=iters; iter++) {
     if ((iter%log_every==1) || (iter==iters)){
+      avg_mse=sum_mse(population_losses, 0, pop_size)/(float)pop_size;
       save_best(d_population_images+population_losses[0].index*img_x*img_y, 
                 best_mate_img, 
                 d_population+population_losses[0].index*mate_size*genotype_length,
                 h_best_mate,
-                img_x, img_y, iter, no_figures);
+                img_x, img_y, iter, no_figures, 
+                population_losses[0].value, avg_mse);
       printf("iter number: %d. Best MSE: %f \n", iter, population_losses[0].value);
       printf("Current #rectangles is %d\n", no_figures);
 
