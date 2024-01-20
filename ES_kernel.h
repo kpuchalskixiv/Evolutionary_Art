@@ -100,7 +100,8 @@ __global__ void mate_mutation_kernel(  float* population, float* mutation_coefs,
   else tid = mate_size*blockIdx.x + threadIdx.x;
 
   if(mutation_ifs[tid]<mut_prob){
-    population[tid]+=sigmas[blockIdx.x*genotype_length+ (threadIdx.x % genotype_length)]*(mutation_coefs[tid]-0.5f);
+    //population[tid]+=sigmas[blockIdx.x*genotype_length+ (threadIdx.x % genotype_length)]*(mutation_coefs[tid]-0.5f);
+    population[tid]+=sigmas[tid]*(mutation_coefs[tid]-0.5f);
     // int(lower_bound)=0
     population[tid]=fmaxf(0.002f, fminf(population[tid], 1.0f));
   }

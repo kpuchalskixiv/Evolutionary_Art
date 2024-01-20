@@ -120,7 +120,7 @@ int main(int argc, const char **argv){
 
   size_t    bytes = (pop_size + children_per_mate*parents) *mate_size*genotype_length;
   size_t    eval_bytes =  (pop_size + children_per_mate*parents) *img_x*img_y;
-  size_t    sigmas_bytes =  (pop_size + children_per_mate*parents)*genotype_length;
+  //size_t    sigmas_bytes =  (pop_size + children_per_mate*parents)*genotype_length;
 
   // grid is popsizeXcircler_per_mateXcricledim (x1,y1,x2,y2,alpha,gray - cause black&white for start)
   printf("Grid dimensions: %d x %d x %d \n\n", pop_size, mate_size, genotype_length);
@@ -142,12 +142,12 @@ int main(int argc, const char **argv){
   checkCudaErrors( cudaMalloc((void **)&d_population_images, sizeof(float) * eval_bytes) );
   checkCudaErrors( cudaMalloc((void **)&d_target_img, sizeof(float)  *img_x*img_y) );
   
-  checkCudaErrors( cudaMalloc((void **)&d_mutation_sigmas_coef, sizeof(float) *sigmas_bytes) );
-  checkCudaErrors( cudaMalloc((void **)&d_mutation_sigmas_if, sizeof(float) *sigmas_bytes) );
-  checkCudaErrors( cudaMalloc((void **)&d_sigmas, sizeof(float)* sigmas_bytes) );
-  reset_values_kernel<<<pop_size+children_per_mate*parents, genotype_length>>>(d_sigmas, 0.05f, genotype_length);
+  checkCudaErrors( cudaMalloc((void **)&d_mutation_sigmas_coef, sizeof(float) *bytes) );
+  checkCudaErrors( cudaMalloc((void **)&d_mutation_sigmas_if, sizeof(float) *bytes) );
+  checkCudaErrors( cudaMalloc((void **)&d_sigmas, sizeof(float)* bytes) );
+  reset_values_kernel<<<pop_size+children_per_mate*parents, mate_size*genotype_length>>>(d_sigmas, 0.05f, genotype_length);
   getLastCudaError("Reset kernel failed\n");
-  checkCudaErrors( cudaMalloc((void **)&d_sigmas_copy, sizeof(float) *sigmas_bytes) );
+  checkCudaErrors( cudaMalloc((void **)&d_sigmas_copy, sizeof(float) *bytes) );
 
 
   //for(int i=0; i<img_x*img_y; i++) h_target_img[i]=(float)rand()/(float)(RAND_MAX);
@@ -222,33 +222,35 @@ int main(int argc, const char **argv){
                             bytes*sizeof(float),
                             cudaMemcpyDeviceToDevice) );
     checkCudaErrors(cudaMemcpy(d_sigmas_copy, d_sigmas, //destination, source
-                        sigmas_bytes*sizeof(float),
+                        bytes*sizeof(float),
                         cudaMemcpyDeviceToDevice) );
     cudaDeviceSynchronize();  
     population_selection_kernel<<<parents, genotype_length*mate_size>>>(d_population, d_population_copy);
     getLastCudaError("Population selection kernel failed\n");
-    sigmas_selection_kernel<<<parents, genotype_length>>>(d_sigmas, d_sigmas_copy);
+    population_selection_kernel<<<parents, genotype_length*mate_size>>>(d_sigmas, d_sigmas_copy);
+//    sigmas_selection_kernel<<<parents, genotype_length>>>(d_sigmas, d_sigmas_copy);
     getLastCudaError("Sigmas selection kernel failed\n");
     cudaDeviceSynchronize();  
     checkCudaErrors(cudaMemcpy(d_population, d_population_copy, //destination, source
                             bytes*sizeof(float),
                             cudaMemcpyDeviceToDevice) );
     checkCudaErrors(cudaMemcpy(d_sigmas, d_sigmas_copy, //destination, source
-                            sigmas_bytes*sizeof(float),
+                            bytes*sizeof(float),
                             cudaMemcpyDeviceToDevice) );
     cudaDeviceSynchronize();  
 
     //run mutation
     checkCudaErrors( curandGenerateNormal(gen, d_mutation_sigmas_coef, 
-                                    sigmas_bytes,
+                                    bytes,
                                     0.0f, 0.001f) );
-    checkCudaErrors( curandGenerateUniform(gen, d_mutation_sigmas_if, sigmas_bytes));
+    checkCudaErrors( curandGenerateUniform(gen, d_mutation_sigmas_if, bytes));
     checkCudaErrors( curandGenerateUniform(gen, d_mutation_mates_if, bytes));
     checkCudaErrors( curandGenerateUniform(gen, d_mutation_mates_coef, bytes));
     cudaDeviceSynchronize();
 
 
-    sigmas_mutation_kernel<<<children_per_mate*parents, genotype_length>>>(d_sigmas,  d_mutation_sigmas_coef, d_mutation_sigmas_if, true);
+//    sigmas_mutation_kernel<<<children_per_mate*parents, genotype_length>>>(d_sigmas,  d_mutation_sigmas_coef, d_mutation_sigmas_if, true);
+    sigmas_mutation_kernel<<<children_per_mate*parents, no_figures*genotype_length>>>(d_sigmas,  d_mutation_sigmas_coef, d_mutation_sigmas_if, true);
     getLastCudaError("Sigmas mutation kernel failed\n");
     cudaDeviceSynchronize();
     mate_mutation_kernel<<<children_per_mate*parents, genotype_length*no_figures>>>(d_population, d_mutation_mates_coef, d_mutation_mates_if, d_sigmas, true);
