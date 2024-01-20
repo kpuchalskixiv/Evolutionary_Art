@@ -164,7 +164,9 @@ int main(int argc, const char **argv){
  // checkCudaErrors( curandSetPseudoRandomGeneratorSeed(gen, 1234ULL) );
   checkCudaErrors( curandGenerateUniform(gen, d_population, bytes) );
  // checkCudaErrors( curandGenerateNormal(gen, d_population, bytes, 0.5f, 0.2f) );
-
+  fix_param_kernel<<<pop_size+children_per_mate*parents, mate_size>>>(d_population, 3, 0.5f) ;
+  getLastCudaError("fixing opacity kernel failed\n");
+  cudaDeviceSynchronize();  
 
 
   // Set up the execution configuration

@@ -73,6 +73,7 @@ __global__ void sigmas_selection_kernel(
 }
 
 //<<<population, genotype_len>>>
+//<<<population, mate_sizeXgenotype_len>>>
 __global__ void sigmas_mutation_kernel(  
   float* sigmas, 
   float* mutation_coefs, float* mutation_ifs,
@@ -153,7 +154,11 @@ __global__ void reset_values_kernel(float* array, float value, int size){
     array[arr_start+pixd]=value;
     pixd+=blockDim.x;
   }
-
+}
+// fix e.g. opacity by <<<pop_size, mate_size>>>(population, 3, value)
+__global__ void fix_param_kernel(float* array, int idx, float value){
+  int tid=mate_size*blockIdx.x*genotype_length+mate_size*threadIdx.x;
+  array[tid+idx]=value;
 }
 
 //draw_kernel<<<#mate, 128>>>
@@ -200,8 +205,9 @@ __global__ void draw_kernel(
     int id =rectangle_start +pixd_row*img_y +pixd_col;
     __syncthreads(); 
     while((pixd<width*height)
-    && (pixd_row<width) 
-    && (pixd_col<width)){ // cache misses should occur whilst changing rows
+    && (pixd_row<height) 
+    //&& (pixd_col<width)
+    ){ // cache misses should occur whilst changing rows
       population_images[id
                         ]*=(1-opacity);
       population_images[id
