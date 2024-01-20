@@ -80,6 +80,30 @@ void read_target(float* target_img,  int img_x, int img_y){
 ////////////////////////////////////////////////////////////////////////
 // Main program
 ////////////////////////////////////////////////////////////////////////
+void run_single_evaluation(
+  float* d_population, 
+  float* d_population_images, 
+  float* d_target_img,
+  int img_x, int img_y, int no_figures, int max_radius){
+    //mem set doesnt work with floats
+   // checkCudaErrors(cudaMemset(d_population_images, 0.0f, sizeof(float)*img_x*img_y*(pop_size+children_per_mate*parents)));
+
+    reset_values_kernel<<<pop_size+children_per_mate*parents, 1024>>>(d_population_images, 0.0f, img_x*img_y);
+    getLastCudaError("Reset kernel failed\n");
+    cudaDeviceSynchronize();
+
+    draw_kernel<<<pop_size+children_per_mate*parents, 1024>>>(d_population, d_population_images, no_figures, img_x, img_y, max_radius);
+    getLastCudaError("Draw kernel failed\n");
+    cudaDeviceSynchronize();
+
+    eval_kernel<<<pop_size+children_per_mate*parents, 1024, 1024*sizeof(float)>>>(d_population_images, 
+                                   d_target_img, img_x, img_y);
+    getLastCudaError("Eval kernel failed\n");
+    cudaDeviceSynchronize();
+
+    qsort(population_losses, pop_size+children_per_mate*parents, sizeof(population_losses[0]), cmp);
+}
+
 
 int main(int argc, const char **argv){
 
@@ -144,9 +168,9 @@ int main(int argc, const char **argv){
 
 
   // Set up the execution configuration
-  int iters=100000, log_every=1000,
+  int iters=1000000, log_every=10000,
 
-  no_figures=1, update_frequency=2000;
+  no_figures=2, update_frequency=2000;
 
 
   
@@ -156,6 +180,11 @@ int main(int argc, const char **argv){
   log_objective_values=(float *)malloc(sizeof(float)*iters);
   int iter, m=0;
 
+  run_single_evaluation(d_population, 
+                        d_population_images, 
+                        d_target_img,
+                        img_x,  img_y,  no_figures,  max_radius);
+                        
   for (iter=0; iter<=iters; iter++) {
     if ((iter%log_every==1) || (iter==iters)){
       save_best(d_population_images+population_losses[0].index*img_x*img_y, 
@@ -164,6 +193,8 @@ int main(int argc, const char **argv){
                 h_best_mate,
                 img_x, img_y, iter, no_figures);
       printf("iter number: %d. Best MSE: %f \n", iter, population_losses[0].value);
+      printf("Current #rectangles is %d\n", no_figures);
+
  /*    printf("%f %d, %f %d, %f %d \n", 
       population_losses[0].value, population_losses[0].index,
       population_losses[pop_size-1].value, population_losses[pop_size-1].index,
@@ -174,13 +205,13 @@ int main(int argc, const char **argv){
     
     // run selection, choose best parents and copy paste them into latter half of population array
     max_mse=population_losses[pop_size+children_per_mate*parents-1].value;
-    fitness_values_kernel<<<1, pop_size+children_per_mate*parents, sizeof(float)*pop_size*children_per_mate*parents>>>(max_mse);
+    fitness_values_kernel<<<1, pop_size+children_per_mate*parents, sizeof(float)*(pop_size+children_per_mate*parents)>>>(max_mse);
     getLastCudaError("fitness values kernel failed\n");
     cudaDeviceSynchronize();  
     for(int p=0; p<parents;p++){
       r_float=(float)rand()/(float)(RAND_MAX);
       m=0;
-      while(r_float>=0){
+      while((r_float>=0) && (m<pop_size+children_per_mate*parents)){
         r_float-=population_losses[m].value;
         m++;
       }
@@ -224,28 +255,11 @@ int main(int argc, const char **argv){
     getLastCudaError("Population mutation kernel failed\n");
     cudaDeviceSynchronize();    
 
-
-
-
-
     //run evaluation
-    //mem set doesnt work with floats
-   // checkCudaErrors(cudaMemset(d_population_images, 0.0f, sizeof(float)*img_x*img_y*(pop_size+children_per_mate*parents)));
-
-    reset_values_kernel<<<pop_size+children_per_mate*parents, 1024>>>(d_population_images, 0.0f, img_x*img_y);
-    getLastCudaError("Reset kernel failed\n");
-    cudaDeviceSynchronize();
-
-    draw_kernel<<<pop_size+children_per_mate*parents, 1024>>>(d_population, d_population_images, no_figures, img_x, img_y, max_radius);
-    getLastCudaError("Draw kernel failed\n");
-    cudaDeviceSynchronize();
-
-    eval_kernel<<<pop_size+children_per_mate*parents, 1024, 1024*sizeof(float)>>>(d_population_images, 
-                                   d_target_img, img_x, img_y);
-    getLastCudaError("Eval kernel failed\n");
-    cudaDeviceSynchronize();
-
-    qsort(population_losses, pop_size+children_per_mate*parents, sizeof(population_losses[0]), cmp);
+    run_single_evaluation(d_population, 
+                          d_population_images, 
+                          d_target_img,
+                          img_x,  img_y,  no_figures,  max_radius);
 
 
     log_objective_values[iter]=population_losses[0].value;
@@ -258,7 +272,7 @@ int main(int argc, const char **argv){
       if((prev-curr)/prev < add_cricle_threshold*powf(0.995, no_figures)){
         last_update_iter=iter;
         no_figures+=1;
-        printf("Added rectangle at iter %d, current # is %d\n", iter, no_figures);
+       // printf("Added rectangle at iter %d, current # is %d\n", iter, no_figures);
       }
       
     }
