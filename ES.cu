@@ -204,14 +204,14 @@ int main(int argc, const char **argv){
     }
     
     // run selection, choose best parents and copy paste them into latter half of population array
-    max_mse=population_losses[pop_size+children_per_mate*parents-1].value;
-    fitness_values_kernel<<<1, pop_size+children_per_mate*parents, sizeof(float)*(pop_size+children_per_mate*parents)>>>(max_mse);
+    max_mse=population_losses[pop_size-1].value;
+    fitness_values_kernel<<<1, pop_size, sizeof(float)*pop_size>>>(max_mse);
     getLastCudaError("fitness values kernel failed\n");
     cudaDeviceSynchronize();  
     for(int p=0; p<parents;p++){
       r_float=(float)rand()/(float)(RAND_MAX);
       m=0;
-      while((r_float>=0) && (m<pop_size+children_per_mate*parents)){
+      while((r_float>=0) && (m<pop_size)){
         r_float-=population_losses[m].value;
         m++;
       }
@@ -225,12 +225,20 @@ int main(int argc, const char **argv){
                         bytes*sizeof(float),
                         cudaMemcpyDeviceToDevice) );
     cudaDeviceSynchronize();  
+
     population_selection_kernel<<<parents, genotype_length*mate_size>>>(d_population, d_population_copy);
-    getLastCudaError("Population selection kernel failed\n");
+    getLastCudaError("Population children kernel failed\n");
     population_selection_kernel<<<parents, genotype_length*mate_size>>>(d_sigmas, d_sigmas_copy);
-//    sigmas_selection_kernel<<<parents, genotype_length>>>(d_sigmas, d_sigmas_copy);
-    getLastCudaError("Sigmas selection kernel failed\n");
+    getLastCudaError("Population children kernel failed\n");
     cudaDeviceSynchronize();  
+
+    create_children_kernel<<<parents, genotype_length*mate_size>>>(d_population, d_population_copy);
+    getLastCudaError("Population children kernel failed\n");
+    create_children_kernel<<<parents, genotype_length*mate_size>>>(d_sigmas, d_sigmas_copy);
+//    sigmas_selection_kernel<<<parents, genotype_length>>>(d_sigmas, d_sigmas_copy);
+    getLastCudaError("Sigmas children kernel failed\n");
+    cudaDeviceSynchronize();  
+
     checkCudaErrors(cudaMemcpy(d_population, d_population_copy, //destination, source
                             bytes*sizeof(float),
                             cudaMemcpyDeviceToDevice) );
@@ -250,10 +258,10 @@ int main(int argc, const char **argv){
 
 
 //    sigmas_mutation_kernel<<<children_per_mate*parents, genotype_length>>>(d_sigmas,  d_mutation_sigmas_coef, d_mutation_sigmas_if, true);
-    sigmas_mutation_kernel<<<children_per_mate*parents, no_figures*genotype_length>>>(d_sigmas,  d_mutation_sigmas_coef, d_mutation_sigmas_if, true);
+    sigmas_mutation_kernel<<<children_per_mate*parents, no_figures*genotype_length>>>(d_sigmas,  d_mutation_sigmas_coef, d_mutation_sigmas_if);
     getLastCudaError("Sigmas mutation kernel failed\n");
     cudaDeviceSynchronize();
-    mate_mutation_kernel<<<children_per_mate*parents, genotype_length*no_figures>>>(d_population, d_mutation_mates_coef, d_mutation_mates_if, d_sigmas, true);
+    mate_mutation_kernel<<<children_per_mate*parents, genotype_length*no_figures>>>(d_population, d_mutation_mates_coef, d_mutation_mates_if, d_sigmas);
     getLastCudaError("Population mutation kernel failed\n");
     cudaDeviceSynchronize();    
 

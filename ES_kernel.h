@@ -1,8 +1,8 @@
 // device code
-#define pop_size 64  // blockX
+#define pop_size 128  // blockX
 #define mate_size 128 // blockX
 #define children_per_mate 16
-#define parents 16
+#define parents 8
 #define genotype_length 5
 
 
@@ -34,9 +34,22 @@ __global__ void fitness_values_kernel(
   population_losses[tid].value=fit_val/temp[0];
 }
 
+
+// <<<pop_size, mate_size&genotype_len>>>
+__global__ void population_selection_kernel(  
+  float* population, float* population_copy
+  )
+{
+  int mate_id = population_losses[blockIdx.x].index;
+  int mate_chromosome_id=mate_id*blockDim.x;
+
+  int tid=threadIdx.x;
+  // copy mate to new (ordered) position
+  population_copy[blockIdx.x*mate_size*genotype_length+tid]=population[mate_chromosome_id+tid];
+}
 // block as parent, thread for each gene (blockDim.x=mate_sizeXgenotype_lengththreads)
 // select parent (blockidx.x), create children
-__global__ void population_selection_kernel(  
+__global__ void create_children_kernel(  
   float* population, float* population_copy
   )
 {
@@ -45,14 +58,13 @@ __global__ void population_selection_kernel(
   int parent_chromosome_id=parent_id*blockDim.x;
 
   int tid=threadIdx.x;
-  // copy parent itself
-  population_copy[blockIdx.x*mate_size*genotype_length+tid]=population[parent_chromosome_id+tid];
   // create childrens, copies of parent
   for(int i=0; i<children_per_mate; i++){
     population_copy[child_chromosome_id+tid]=population[parent_chromosome_id+tid];
     child_chromosome_id+=blockDim.x;
   }
 }
+
 // block as parent, thread for each gene (blockDim.x=genotype_lengththreads)
 __global__ void sigmas_selection_kernel(  
   float* sigmas, float* sigmas_copy
@@ -77,13 +89,11 @@ __global__ void sigmas_selection_kernel(
 __global__ void sigmas_mutation_kernel(  
   float* sigmas, 
   float* mutation_coefs, float* mutation_ifs,
-  bool children=false,
   float scale=0.001f, float mut_prob=0.5f)
 {
- // int tid = blockDim.x*blockIdx.x + threadIdx.x;
-  int tid;
-  if(children) tid = blockDim.x*(blockIdx.x + pop_size)+ threadIdx.x;
-  else tid = blockDim.x*blockIdx.x + threadIdx.x;
+ // mutate only children
+  int tid = blockDim.x*(blockIdx.x + pop_size)+ threadIdx.x;
+ // else tid = blockDim.x*blockIdx.x + threadIdx.x;
 
   if(mutation_ifs[tid]<mut_prob){
     sigmas[tid]+=mutation_coefs[tid];
@@ -93,11 +103,11 @@ __global__ void sigmas_mutation_kernel(
 
 // <<<population, no_figures*genotype_len>>>
 __global__ void mate_mutation_kernel(  float* population, float* mutation_coefs, float* mutation_ifs, float* sigmas,
- bool children=false, float mut_prob=0.5f)
+  float mut_prob=0.5f)
 {
-  int tid;
-  if(children) tid = mate_size*(blockIdx.x + pop_size)+ threadIdx.x;
-  else tid = mate_size*blockIdx.x + threadIdx.x;
+  // mutate only children
+  int tid = mate_size*(blockIdx.x + pop_size)+ threadIdx.x;
+ // else tid = mate_size*blockIdx.x + threadIdx.x;
 
   if(mutation_ifs[tid]<mut_prob){
     //population[tid]+=sigmas[blockIdx.x*genotype_length+ (threadIdx.x % genotype_length)]*(mutation_coefs[tid]-0.5f);
