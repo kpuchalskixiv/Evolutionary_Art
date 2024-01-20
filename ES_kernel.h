@@ -12,42 +12,61 @@ struct loss_item
 };
 __device__ __managed__ loss_item population_losses[pop_size+children_per_mate*parents];
 
+
+// block as parent, thread for each gene (blockDim.x=mate_sizeXgenotype_len threads)
+// select parent (blockidx.x), create children
+__global__ void selection_kernel(  float* population, float* population_copy, int genotype_length=8)
+{
+  int parent_id = population_losses[blockIdx.x].index;
+  int child_chromosome_id = (pop_size+blockIdx.x)*blockDim.x;
+  int parent_chromosome_id=parent_id*blockDim.x;
+
+  int tid=threadIdx.x;
+  // copy parent itself
+  population_copy[blockIdx.x*mate_size*genotype_length+tid]=population[parent_chromosome_id+tid];
+  // create childrens, copies of parent
+  for(int i=0; i<children_per_mate; i++){
+    population_copy[child_chromosome_id+tid]=population[parent_chromosome_id+tid];
+    child_chromosome_id+=blockDim.x;
+  }
+}
+
+
+
 // TODO !!!!
 // slowly unlock more circles as iterations progres
-__global__ void mutate_kernel(long long mate_idx,
-	         	      const float* __restrict__ population,
-			            float* output_img_idx)
+__global__ void mutation_kernel(  float* populaion, float* mutation_coefs, int genotype_length=8)
 {
-  //population as pop_size*circles_per_mate X 7 matrix
-  // each circle represented as real number vector of dim=7
+  int tid = blockDim.x*blockIdx.x + threadIdx.x;
+  populaion[tid]*=mutation_coefs[tid];
 }
 
 // eval_kernel <<<#mates, 1024, shared_mem>>
 __global__ void eval_kernel(
   float* population_images, 
   float* target_img,
-  int img_x, int img_y,
-
-  bool children=false
+  int img_x, int img_y
 ){
 
   extern  __shared__  float temp[];
   int mate_img_idx, mate_idx;
-  if (children) mate_idx=pop_size + blockIdx.x;
-  else          mate_idx=blockIdx.x;
+  mate_idx=blockIdx.x;
   mate_img_idx=mate_idx*img_x*img_y;
 
   int tid=threadIdx.x;
   int pixd=threadIdx.x;
   temp[tid]=0;
-  int mate_pixel, org_pixel;
+  __syncthreads(); 
   while(pixd<img_x*img_y){
-    mate_pixel=population_images[mate_img_idx + pixd];
-    org_pixel=target_img[pixd];
-    temp[tid]+=(mate_pixel-org_pixel)*(mate_pixel-org_pixel);
+    temp[tid]+=powf(fabsf(target_img[pixd]-population_images[mate_img_idx + pixd]), 2.0f);    
+   // if (population_images[mate_img_idx + pixd]>0)
+   //   printf("mate+tid: %d, temp[tid]= %f, mate_pixel: %f\n",mate_idx+tid, temp[tid], population_images[mate_img_idx + pixd]);
     pixd+=blockDim.x;    
+      __syncthreads(); 
+
   }
   __syncthreads(); 
+ // printf("mate+tid: %d, temp[tid]= %f\n",mate_idx+tid, temp[tid]);
 
   for (int d=blockDim.x/2; d>0; d=d/2) {
     __syncthreads();  // ensure previous step completed 
@@ -55,18 +74,19 @@ __global__ void eval_kernel(
   }
   __syncthreads();  // ensure previous step completed 
 
-  if(tid==0)
+  if(tid==0){
     population_losses[mate_idx].value=temp[0];
     population_losses[mate_idx].index=mate_idx;
-
+  }
+  __syncthreads(); 
 }
 
 // block per image
 __global__ void reset_images_kernel(float* population_images, int x_img, int y_img){
   int img_start=blockIdx.x*x_img*y_img;
   int pixd=threadIdx.x;
-  while(pixd<img_start+x_img*y_img){
-    population_images[pixd]=0.0f;
+  while(pixd<x_img*y_img){
+    population_images[img_start+pixd]=0.0f;
     pixd+=blockDim.x;
   }
 
@@ -81,11 +101,10 @@ __global__ void draw_kernel(
 
   int img_x, int img_y,
 
-  bool children=false, int genotype_length=8)
+  int genotype_length=8)
 {
   int mate_chromosome_idx, mate_idx;
-  if (children) mate_idx=pop_size + blockIdx.x;
-  else          mate_idx=blockIdx.x;
+  mate_idx=blockIdx.x;
   mate_chromosome_idx=mate_idx*mate_size*genotype_length;
   
   int x_ul,y_ul,x_br,y_br, x_size, y_size, pixd, pixd_row, pixd_col, rectangle_start, org_pixel;

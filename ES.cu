@@ -18,9 +18,9 @@ int cmp(const void *a, const void *b)
 {
     struct loss_item *a1 = (struct loss_item *)a;
     struct loss_item *a2 = (struct loss_item *)b;
-    if ((*a1).value > (*a2).value)
+    if ((*a1).value < (*a2).value)
         return -1;
-    else if ((*a1).value < (*a2).value)
+    else if ((*a1).value > (*a2).value)
         return 1;
     else
         return 0;
@@ -51,6 +51,7 @@ int main(int argc, const char **argv){
 
   float *best_mate_img,
         *d_population,
+        *d_population_copy,
         *d_population_images,
         *d_mutation_coef,
         *d_target_img, *h_target_img;
@@ -65,13 +66,16 @@ int main(int argc, const char **argv){
 
   // grid is popsizeXcircler_per_mateXcricledim (x1,y1,x2,y2,alpha,gray - cause black&white for start)
   printf("Grid dimensions: %d x %d x %d \n\n", pop_size, mate_size, genotype_length);
+  // initialise card
+  findCudaDevice(argc, argv);
 
   // allocate memory for arrays
   best_mate_img = (float *)malloc(sizeof(float) * img_y*img_x);
   h_target_img = (float *)malloc(sizeof(float) * img_y*img_x);
   checkCudaErrors( cudaMalloc((void **)&d_population, sizeof(float) * bytes) );
+  checkCudaErrors( cudaMalloc((void **)&d_population_copy, sizeof(float) * bytes) );
   checkCudaErrors( cudaMalloc((void **)&d_population_images, sizeof(float) * eval_bytes) );
-  checkCudaErrors( cudaMalloc((void **)&d_mutation_coef, sizeof(float) * children_per_mate*parents*mate_size*genotype_length) );
+  checkCudaErrors( cudaMalloc((void **)&d_mutation_coef, sizeof(float) *bytes) );
   checkCudaErrors( cudaMalloc((void **)&d_target_img, sizeof(float)  *img_x*img_y) );
 
   for(int i=0; i<img_x*img_y; i++) h_target_img[i]=(float)rand()/(float)(RAND_MAX);
@@ -86,10 +90,9 @@ int main(int argc, const char **argv){
   checkCudaErrors( curandSetPseudoRandomGeneratorSeed(gen, 1234ULL) );
   checkCudaErrors( curandGenerateUniform(gen, d_population, bytes) );
   checkCudaErrors( curandGenerateNormal(gen, d_mutation_coef, 
-                                        children_per_mate*parents * mate_size * genotype_length,
+                                        bytes,
                                         1.0f, 0.001f) );
-  // initialise card
-  findCudaDevice(argc, argv);
+
 
   // Set up the execution configuration
   int no_circles=4, update_frequency=100, last_update_iter=0;
@@ -97,56 +100,59 @@ int main(int argc, const char **argv){
   float add_cricle_threshold=0.01, prev, curr;
   log_objective_values=(float *)malloc(sizeof(float)*iters);
 
-  //run evaluation on basic population
-  //_kernel<<1,pop_size>>(d_population, d_eval_population, 0, pop_size)
-
   int iter;
-  for (iter=1; iter<iters; iter++) {
+  for (iter=1; iter<=iters; iter++) {
     if (iter%log_every==0){
       save_best();
       printf("iter number: %d. Best MSE: %f \n", iter, population_losses[0].value);
-      printf("%f %d, %f %d, %f %d \n", population_losses[0].value, population_losses[0].index,
-      population_losses[10].value, population_losses[10].index,
-      population_losses[pop_size-1].value, population_losses[pop_size-1].index);
+ /*    printf("%f %d, %f %d, %f %d \n", 
+      population_losses[0].value, population_losses[0].index,
+      population_losses[pop_size-1].value, population_losses[pop_size-1].index,
+      population_losses[pop_size+children_per_mate*parents-1].value, population_losses[pop_size+children_per_mate*parents-1].index
+      );*/ 
+
     }
     
+    // run selection, choose best parents and copy paste them into latter half of population array
+    checkCudaErrors(cudaMemcpy(d_population_copy, d_population, //destination, source
+                            bytes*sizeof(float),
+                            cudaMemcpyDeviceToDevice) );
+    cudaDeviceSynchronize();  
+    selection_kernel<<<parents, genotype_length*mate_size>>>(d_population, d_population_copy, genotype_length);
+    getLastCudaError("Selection kernel failed\n");
+    cudaDeviceSynchronize();  
+    checkCudaErrors(cudaMemcpy(d_population, d_population_copy, //destination, source
+                            bytes*sizeof(float),
+                            cudaMemcpyDeviceToDevice) );
+    cudaDeviceSynchronize();  
+
+    //run mutation
+    checkCudaErrors( curandGenerateNormal(gen, d_mutation_coef, 
+                                    (pop_size+children_per_mate*parents) * mate_size * genotype_length,
+                                    1.0f, 0.001f) );
+    cudaDeviceSynchronize();
+
+    mutation_kernel<<<pop_size+children_per_mate*parents, genotype_length*mate_size>>>(d_population, d_mutation_coef, genotype_length);
+    getLastCudaError("Mutation kernel failed\n");
+    cudaDeviceSynchronize();    
+
+
     //run evaluation
-    reset_images_kernel<<<pop_size, 512>>>(d_population_images, img_x, img_y);
-    cudaDeviceSynchronize();
+    reset_images_kernel<<<pop_size+children_per_mate*parents, 512>>>(d_population_images, img_x, img_y);
     getLastCudaError("Reset kernel failed\n");
-
-    //draw_kernel<<<pop_size, 512>>>(d_population, d_population_images, mate_size, img_x, img_y, false, genotype_length);
-    //cudaDeviceSynchronize();
-  //  getLastCudaError("Draw kernel failed\n");
-
-    eval_kernel<<<pop_size, 512, 512*sizeof(float)>>>(d_population_images, 
-                                   d_target_img, img_x, img_y);
     cudaDeviceSynchronize();
+
+    draw_kernel<<<pop_size+children_per_mate*parents, 512>>>(d_population, d_population_images, mate_size, img_x, img_y, genotype_length);
+    getLastCudaError("Draw kernel failed\n");
+    cudaDeviceSynchronize();
+
+    eval_kernel<<<pop_size+children_per_mate*parents, 512, 512*sizeof(float)>>>(d_population_images, 
+                                   d_target_img, img_x, img_y);
     getLastCudaError("Eval kernel failed\n");
+    cudaDeviceSynchronize();
 
     qsort(population_losses, pop_size+children_per_mate*parents, sizeof(population_losses[0]), cmp);
-    
 
-    // run parent selection
-    // for starters, choose K best mates
-
-    // run crossover kernel
-    // TODO
-
-
-    // run mutation kernel, circle per thread
-    //<<<nblocks,nthreads>>>
-    checkCudaErrors( curandGenerateNormal(gen, d_mutation_coef, 
-                                      children_per_mate*parents * mate_size * genotype_length,
-                                      1.0f, 0.001f) );
-      cudaDeviceSynchronize();
-
-    //mutate_kernel<<parents,mate_size*children_per_mate>>(d_population, parent_idxs, d_mutation_coef, no_circles, children_per_mate) // add sigmas
-    
-    // run evaluation kerenel
-    // probably most time consuming part so focus on pararellizing this
-    //evaluate_kernel<<parents,children_per_mate>>(d_population, d_eval_population, true)
-    // select next population, little data  128~=pop_size+no_children floats
 
 
     if(iter%update_frequency==0 
