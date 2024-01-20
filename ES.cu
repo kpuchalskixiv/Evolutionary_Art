@@ -76,10 +76,6 @@ void read_target(float* target_img,  int img_x, int img_y){
   fclose(fp);
 }
 
-
-////////////////////////////////////////////////////////////////////////
-// Main program
-////////////////////////////////////////////////////////////////////////
 void run_single_evaluation(
   float* d_population, 
   float* d_population_images, 
@@ -103,7 +99,9 @@ void run_single_evaluation(
 
     qsort(population_losses, pop_size+children_per_mate*parents, sizeof(population_losses[0]), cmp);
 }
-
+////////////////////////////////////////////////////////////////////////
+// Main program
+////////////////////////////////////////////////////////////////////////
 
 int main(int argc, const char **argv){
 
@@ -229,7 +227,7 @@ int main(int argc, const char **argv){
     cudaDeviceSynchronize();  
     population_selection_kernel<<<parents, genotype_length*mate_size>>>(d_population, d_population_copy);
     getLastCudaError("Population selection kernel failed\n");
-    population_selection_kernel<<<parents, genotype_length>>>(d_sigmas, d_sigmas_copy);
+    sigmas_selection_kernel<<<parents, genotype_length>>>(d_sigmas, d_sigmas_copy);
     getLastCudaError("Sigmas selection kernel failed\n");
     cudaDeviceSynchronize();  
     checkCudaErrors(cudaMemcpy(d_population, d_population_copy, //destination, source
