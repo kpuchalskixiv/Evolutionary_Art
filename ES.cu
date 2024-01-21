@@ -180,13 +180,13 @@ int main(int argc, const char **argv){
   // Set up the execution configuration
   int iters=1000000, log_every=10000,
 
-  no_figures=4, update_frequency=2000;
+  no_figures=4, update_frequency=1000;
 
 
   
   int last_update_iter=0;
   float *log_objective_values;
-  float add_cricle_threshold=0.01, prev, curr, max_mse, r_float, avg_mse;
+  float add_cricle_threshold=0.005, prev, curr, max_mse, r_float, avg_mse;
   log_objective_values=(float *)malloc(sizeof(float)*iters);
   int iter, m=0;
 
