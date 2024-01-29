@@ -1,2 +1,0 @@
-rysować prostokąty - bardziej efektywny dostęp do pamięci i brak potrzeby opencv
-nie bawić się w wyświetlanie, załadować target_img jako tablicę 2d (lub3d) floatów
